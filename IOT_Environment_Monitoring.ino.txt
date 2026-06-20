@@ -1,0 +1,139 @@
+#include <WiFi.h>
+#include <ThingSpeak.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+#include <DHT.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP085_U.h>
+
+// -------- WIFI DETAILS --------
+const char* ssid = "valli";
+const char* password = "nagur917";
+
+// -------- THINGSPEAK --------
+unsigned long channelID = 3221187;
+const char* writeAPIKey = "FZ9830HN6ZT8HX4V";
+
+// -------- PINS --------
+#define DHTPIN 4
+#define DHTTYPE DHT22
+#define MQ135_PIN 34
+
+// RGB LED for AIR QUALITY
+#define RED_LED   25
+#define YELLOW_LED 26
+#define BLUE_LED  27
+
+// -------- OBJECTS --------
+WiFiClient client;
+DHT dht(DHTPIN, DHTTYPE);
+Adafruit_BMP085_Unified bmp = Adafruit_BMP085_Unified(10085);
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+void setup() {
+  Serial.begin(115200);
+
+  // Force built-in LED OFF
+  pinMode(2, OUTPUT);
+  digitalWrite(2, LOW);
+
+  // RGB LED pins
+  pinMode(RED_LED, OUTPUT);
+  pinMode( YELLOW_LED, OUTPUT);
+  pinMode(BLUE_LED, OUTPUT);
+
+  digitalWrite(RED_LED, LOW);
+  digitalWrite( YELLOW_LED, LOW);
+  digitalWrite(BLUE_LED, LOW);
+
+  dht.begin();
+
+  if (!bmp.begin()) {
+    Serial.println("BMP180 not detected!");
+    while (1);
+  }
+
+  lcd.init();
+  lcd.backlight();
+
+  WiFi.begin(ssid, password);
+  lcd.print("Connecting WiFi");
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  lcd.clear();
+  lcd.print("WiFi Connected");
+
+  ThingSpeak.begin(client);
+  delay(2000);
+}
+
+void loop() {
+
+  // ---- SENSOR READINGS ----
+  float temp = dht.readTemperature();
+  float hum = dht.readHumidity();
+  int airQuality = analogRead(MQ135_PIN);
+
+  sensors_event_t event;
+  bmp.getEvent(&event);
+  float pressure = event.pressure;   // No LED logic used
+
+  // ---- AIR QUALITY RGB LED LOGIC ----
+  if (airQuality < 300) {
+    // GOOD
+    digitalWrite(RED_LED, LOW);
+    digitalWrite( YELLOW_LED, LOW);
+    digitalWrite(BLUE_LED, HIGH);
+    Serial.println("Air Quality GOOD → BLUE LED");
+  }
+  else if (airQuality >= 300 && airQuality <= 500) {
+    // MODERATE
+    digitalWrite(RED_LED, LOW);
+    digitalWrite( YELLOW_LED, HIGH);
+    digitalWrite(BLUE_LED,LOW );
+    Serial.println("Air Quality MODERATE → YELLOW LED");
+  }
+  else {
+    // POOR
+    digitalWrite(RED_LED, HIGH);
+    digitalWrite( YELLOW_LED, LOW);
+    digitalWrite(BLUE_LED, LOW);
+    Serial.println("Air Quality POOR → RED LED");
+  }
+
+  // ---- SERIAL OUTPUT ----
+  Serial.println("----- Sensor Readings -----");
+  Serial.print("Temperature: "); Serial.print(temp); Serial.println(" °C");
+  Serial.print("Humidity   : "); Serial.print(hum); Serial.println(" %");
+  Serial.print("Pressure   : "); Serial.print(pressure); Serial.println(" hPa");
+  Serial.print("Air Quality: "); Serial.println(airQuality);
+  Serial.println("---------------------------");
+
+  // ---- LCD DISPLAY ----
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("T:");
+  lcd.print(temp);
+  lcd.print("c");
+  lcd.print(" H:");
+  lcd.print(hum);
+  lcd.print("%");
+  lcd.setCursor(0, 1);
+  lcd.print("P:");
+  lcd.print(pressure);
+  lcd.print(" AQ:");
+  lcd.print(airQuality);
+
+  // ---- THINGSPEAK UPLOAD ----
+  ThingSpeak.setField(1, temp);
+  ThingSpeak.setField(2, hum);
+  ThingSpeak.setField(3, pressure);
+  ThingSpeak.setField(4, airQuality);
+  ThingSpeak.writeFields(channelID, writeAPIKey);
+
+  delay(2000);   // Use 15000 for real deployment
+}
